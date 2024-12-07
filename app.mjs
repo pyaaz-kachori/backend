@@ -77,5 +77,28 @@ async function handler(req, res) {
                   'X-GitHub-Api-Version': '2022-11-28',
               },
           });
+            // Process each pull request sequentially
+            await Promise.all(pulls.data.map(async (pull) => {
+              // Initialize arrays for each pull request
+              const adjusted_coments_array = [];
+              const adjusted_commit_array = [];
+              const url = pull.html_url;
+              const username = pull.user.login;
+              const title = pull.title;
+              console.log(pull)
   
+              console.log(username, title);
+              console.log("*******************************************************************");
+              console.log(`Processing pull request #${pull.number} in repo: ${repo.name}`);
   
+              // Fetch comments
+              const comments = await octokit.request(`GET /repos/${orgName}/${repo.name}/pulls/${pull.number}/comments`, {
+                  owner: orgName,
+                  repo: repo.name,
+                  pull_number: pull.number,
+                  headers: {
+                      'X-GitHub-Api-Version': '2022-11-28',
+                  },
+              });
+  
+              
