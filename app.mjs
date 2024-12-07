@@ -55,3 +55,27 @@ function AgentOP(commits,comment,name,title,url){
 
 }
 
+async function handler(req, res) {
+  const orgName = req.query.orgName;
+  const repos = await octokit.request(`GET /orgs/${orgName}/repos`, {
+      org: orgName,
+      headers: {
+          'X-GitHub-Api-Version': '2022-11-28'
+      }
+  });
+  
+  // Use Promise.all to process repos sequentially
+  await Promise.all(repos.data.map(async (repo) => {
+      console.log(`Processing repository: ${repo.name}`);
+  
+      try {
+          const pulls = await octokit.request(`GET /repos/${orgName}/${repo.name}/pulls/`, {
+              owner: orgName,
+              repo: repo.name,
+              state: 'open',
+              headers: {
+                  'X-GitHub-Api-Version': '2022-11-28',
+              },
+          });
+  
+  
