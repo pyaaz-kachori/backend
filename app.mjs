@@ -6,10 +6,160 @@ import express from 'express';
 import axios from 'axios';
 import { Octokit } from '@octokit/core';
 
+import {
+  EAS,
+  Offchain,
+  SchemaEncoder,
+  SchemaRegistry,
+  NO_EXPIRATION,
+
+} from "@ethereum-attestation-service/eas-sdk";
+import pkg from '@ethereum-attestation-service/eas-sdk';
+import fs from 'fs';
+const { OFFCHAIN_ATTESTATION_VERSION, PartialTypedDataConfig } = pkg;
+
+import { ethers } from "ethers";
+import axios from "axios";
+
+const rpc = "https://eth.merkle.io";
+const EASContractAddress = "0xC2679fBD37d54388Ce493F1DB75320D236e1815e"; // Sepolia v0.26
+const schema = "string link,string username,string review,string score";
+// Initialize the sdk with the address of the EAS Schema contract address
+const eas = new EAS(EASContractAddress);
+const publisher_url = "https://publisher.walrus-testnet.walrus.space"
+
+const aggregator_url = "https://aggregator.walrus-testnet.walrus.space"
+// Gets a default provider (in production use something else like infura/alchemy)
+const provider = ethers.getDefaultProvider("sepolia");
+const schemaUID = "0xad36d2219bedd18eba6141f18be268a5225fcfeaf57c22b6c83ff08acab3aaa1"
+
+const storeURL = "http://localhost:8000/pr"
+
+// Connects an ethers style provider/signingProvider to perform read/write functions.
+// MUST be a signer to do write operations!
+eas.connect(provider);
+const signer = new ethers.Wallet("a290bca74f3a742b5f87ddeeefe4c42eda9c0158acda2a3618b37382de1cd95d", rpc);
+const offchain = await eas.getOffchain();
+console.log(offchain)
+console.log("***********************************")
+async function createOffchainAttestationJSON(encodedData) {
+  const NO_EXPIRATION = 0;
+
+  const offchainAttestation = await offchain.signOffchainAttestation(
+    {
+      recipient: "0x0000000000000000000000000000000000000000",
+      expirationTime: NO_EXPIRATION, // Unix timestamp of when attestation expires (0 for no expiration)
+      time: BigInt(Math.floor(Date.now() / 1000)), // Unix timestamp of current time
+      revocable: true, // Be aware that if your schema is not revocable, this MUST be false
+      schema:
+        schemaUID,
+      refUID:
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+      data: encodedData,
+    },
+    signer
+  );
+
+  // delete offchainAttestation["types"];
+
+  return offchainAttestation
+}
+
+
+async function uploadBLOB(data) {
+  const store_url = `${publisher_url}/v1/store`
+  const response = await axios.put(
+    store_url,
+    data
+  )
+  return response.data
+}
+
+async function downloadBLOB(blob_id) {
+  const store_url = `${aggregator_url}/v1/${blob_id}`
+  const response = await axios.get(
+    store_url
+  )
+  return response.data
+}
+
+async function verifyAttestation(attestation) {
+  const EAS_CONFIG = {
+    address: attestation.sig.domain.verifyingContract,
+    version: attestation.sig.domain.version,
+    chainId: attestation.sig.domain.chainId,
+  };
+  console.log(OFFCHAIN_ATTESTATION_VERSION)
+  const ofc = new Offchain(EAS_CONFIG, 2);
+  console.log(offchain);
+  const isValidAttestation = offchain.verifyOffchainAttestationSignature(
+    attestation.signer,
+    attestation.sig
+  );
+  return isValidAttestation;
+}
+
+function convertAttestationObject(inputAttestation, signer) {
+  const schemaUID = inputAttestation.message.schema; // Use the schema from the input
+  const obj = {
+    sig: {
+      version: 2, // Fixed version
+      domain: {
+        name: inputAttestation.domain.name,
+        version: inputAttestation.domain.version,
+        chainId: inputAttestation.domain.chainId.toString(), // Convert bigint to string
+        verifyingContract: inputAttestation.domain.verifyingContract,
+      },
+      primaryType: inputAttestation.primaryType,
+      types: {
+        Attest: [
+          { name: "version", type: "uint16" },
+          { name: "schema", type: "bytes32" },
+          { name: "recipient", type: "address" },
+          { name: "time", type: "uint64" },
+          { name: "expirationTime", type: "uint64" },
+          { name: "revocable", type: "bool" },
+          { name: "refUID", type: "bytes32" },
+          { name: "data", type: "bytes" },
+          { name: "salt", type: "bytes32" },
+        ],
+      },
+      signature: {
+        r: inputAttestation.signature.r,
+        s: inputAttestation.signature.s,
+        v: inputAttestation.signature.v,
+      },
+      uid: inputAttestation.uid,
+      message: {
+        version: 2, // Fixed version
+        schema: schemaUID, // Use the schema from inputAttestation
+        recipient: inputAttestation.message.recipient, // Use the recipient from inputAttestation
+        time: inputAttestation.message.time.toString(), // Convert bigint to string
+        expirationTime: inputAttestation.message.expirationTime.toString(), // Convert bigint to string
+        refUID: inputAttestation.message.refUID,
+        revocable: inputAttestation.message.revocable,
+        data: inputAttestation.message.data,
+        nonce: "0", // Add a fixed nonce
+        salt: inputAttestation.message.salt,
+      },
+    },
+    signer: "0x864512FDeef2185Bfb8e736Ce5f54dEe09fDa9b4", // Add signer manually or use the provided value
+  };
+
+  function replacer(key, value) {
+    if (typeof value === "bigint") {
+      return value.toString(); // Convert bigint to string
+    }
+    return value;
+  }
+
+  return JSON.stringify(obj, replacer, 2); // Return the JSON string with formatting
+}
+
 const octokit = new Octokit({
-    auth: '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'
-  })
-  
+  auth: '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'
+})
+
 // Initialize the app
 const app = express();
 
@@ -22,7 +172,7 @@ app.get('/', (req, res) => {
 });
 
 
-app.get('/OrgReview',handler)
+app.get('/OrgReview', handler)
 
 
 // Start the server
@@ -38,7 +188,7 @@ async function fetchPullRequests(config) {
     console.error(error);
   }
 }
-function AgentOP(commits,comment,name,title,url){
+async function AgentOP(commits, comment, name, title, url) {
   console.log(commits)
   console.log(comment) //contributor
   console.log(name) //contributor
@@ -46,119 +196,130 @@ function AgentOP(commits,comment,name,title,url){
   console.log(url)
   var obj = {
     changes: commits,
-    discussion: comment,
-    contributor : name,
-    title:title,
-    url:url
+    discussions: comment,
+    contributor: name,
+    title: title,
+    url: url
   }
-  axios.post(storeURL,JSON.stringify(obj));
+  const config = {
+    headers: {
+      'Content-Type': 'application/json'
+    },
+  }
+  const response = await axios.post(storeURL,JSON.stringify(obj),config); // {link,username,review,score}
+  const schemaEncoder = new SchemaEncoder(schema);
+  const encodedData = schemaEncoder.encodeData([
+    { name: "link", value: response.data.link, type: "string" },
+    { name: "username", value: response.data.username, type: "string" },
+    { name: "review", value: response.data.review, type: "string" },
+    { name: "score", value: response.data.score, type: "string" },
+  ]);
+  const JSONBLOB = await createOffchainAttestationJSON(encodedData)
+  const conv = convertAttestationObject(JSONBLOB, signer)
+  const resp = await uploadBLOB(conv)
+  console.log(`Blob id -----> ${resp.newlyCreated.blobObject.blobId}`)
+  const tx_hash = await uploadBLOB(conv)
+  // console.log(`To checkout the transaction go to -> https://suiscan.xyz/testnet/tx/${tx_hash.alreadyCertified.eventOrObject.Event.txDigest}`)
+  // console.log(`Checkout the blob at ${aggregator_url}/v1/${resp.newlyCreated.blobObject.blobId}`)
+  // const blob = await downloadBLOB(resp.newlyCreated.blobObject.blobId)
+  // console.log("Blob downloaded and saved.")
+  // fs.writeFileSync("attestation.json",JSON.stringify(blob))
+
+  // const attestation =blob
+
+  // const isValid = await verifyAttestation(attestation)
+
+  // console.log(isValid)
 
 }
 
 async function handler(req, res) {
   const orgName = req.query.orgName;
   const repos = await octokit.request(`GET /orgs/${orgName}/repos`, {
-      org: orgName,
-      headers: {
-          'X-GitHub-Api-Version': '2022-11-28'
-      }
-  });
-  
-  // Use Promise.all to process repos sequentially
+    org: orgName,
+    headers: {
+      'X-GitHub-Api-Version': '2022-11-28'
+    }
+});
+
   await Promise.all(repos.data.map(async (repo) => {
-      console.log(`Processing repository: ${repo.name}`);
-  
-      try {
-          const pulls = await octokit.request(`GET /repos/${orgName}/${repo.name}/pulls/`, {
-              owner: orgName,
-              repo: repo.name,
-              state: 'open',
-              headers: {
-                  'X-GitHub-Api-Version': '2022-11-28',
-              },
-          });
-            // Process each pull request sequentially
-            await Promise.all(pulls.data.map(async (pull) => {
-              // Initialize arrays for each pull request
-              const adjusted_coments_array = [];
-              const adjusted_commit_array = [];
-              const url = pull.html_url;
-              const username = pull.user.login;
-              const title = pull.title;
-              console.log(pull)
-  
-              console.log(username, title);
-              console.log("*******************************************************************");
-              console.log(`Processing pull request #${pull.number} in repo: ${repo.name}`);
-  
-              // Fetch comments
-              const comments = await octokit.request(`GET /repos/${orgName}/${repo.name}/pulls/${pull.number}/comments`, {
-                  owner: orgName,
-                  repo: repo.name,
-                  pull_number: pull.number,
-                  headers: {
-                      'X-GitHub-Api-Version': '2022-11-28',
-                  },
-              });
-  
-// Process comments
-comments.data.forEach((comment) => {
-  console.log(`Comment author: ${comment.user.login}`);
-  console.log(`Comment body: ${comment.body}`);
-  adjusted_coments_array.push({
-      username: comment.user.login,
-      body: comment.body
-  });
-});
-
-// Fetch commits
-const commits = await octokit.request(`GET /repos/${orgName}/${repo.name}/pulls/${pull.number}/commits`, {
-  owner: orgName,
-  repo: repo.name,
-  pull_number: pull.number,
-  headers: {
-      'X-GitHub-Api-Version': '2022-11-28',
-  },
-});
-
-// Process commits with await to ensure sequential processing
-for (const commit of commits.data) {
-  // console.log(commit)
-  console.log(`Commit message: ${commit.commit.message}`);
-  console.log(`Commit SHA: ${commit.sha}`);
-
-  const changes = await octokit.request(`GET /repos/${orgName}/${repo.name}/commits/${commit.sha}`, {
-      owner: orgName,
-      repo: repo.name,
-      ref: commit.sha,
-      headers: {
+    try {
+      const pulls = await octokit.request(`GET /repos/${orgName}/${repo.name}/pulls/`, {
+        owner: orgName,
+        repo: repo.name,
+        state: 'open',
+        headers: {
           'X-GitHub-Api-Version': '2022-11-28',
-      },
-  });
+        },
+      });
+      // Process each pull request sequentially
+      await Promise.all(pulls.data.map(async (pull) => {
+        // Initialize arrays for each pull request
+        const adjusted_coments_array = [];
+        const adjusted_commit_array = [];
+        const url = pull.html_url;
+        const username = pull.user.login;
+        const title = pull.title;
+        // Fetch comments
+        const comments = await octokit.request(`GET /repos/${orgName}/${repo.name}/pulls/${pull.number}/comments`, {
+          owner: orgName,
+          repo: repo.name,
+          pull_number: pull.number,
+          headers: {
+            'X-GitHub-Api-Version': '2022-11-28',
+          },
+        });
 
-  console.log("File changes -----------------------");
-  const files = changes.data.files;
-  files.forEach((file) => {
-      const obj = {
-          filename: file.filename,
-          rawURL: file.raw_url,
-          patch: file.patch  
-      };
-      console.log(obj);
-      adjusted_commit_array.push(obj);
-  });
-}
+        // Process comments
+        comments.data.forEach((comment) => {
+          adjusted_coments_array.push({
+            username: comment.user.login,
+            body: comment.body
+          });
+        });
 
-// Only call AgentOP after all commits and comments are processed
-const response = AgentOP(adjusted_commit_array, adjusted_coments_array, username, title,url);
-}));
+        // Fetch commits
+        const commits = await octokit.request(`GET /repos/${orgName}/${repo.name}/pulls/${pull.number}/commits`, {
+          owner: orgName,
+          repo: repo.name,
+          pull_number: pull.number,
+          headers: {
+            'X-GitHub-Api-Version': '2022-11-28',
+          },
+        });
 
-} catch (error) {
-console.error(`Error processing repo ${repo.name}:`, error);
-}
-}));
+        // Process commits with await to ensure sequential processing
+        for (const commit of commits.data) {
+          const changes = await octokit.request(`GET /repos/${orgName}/${repo.name}/commits/${commit.sha}`, {
+            owner: orgName,
+            repo: repo.name,
+            ref: commit.sha,
+            headers: {
+              'X-GitHub-Api-Version': '2022-11-28',
+            },
+          });
 
-res.send("done");
+          const files = changes.data.files;
+          files.forEach((file) => {
+            const obj = {
+              filename: file.filename,
+              rawURL: file.raw_url,
+              patch: file.patch
+            };
+            console.log(obj);
+            adjusted_commit_array.push(obj);
+          });
+        }
+
+        // Only call AgentOP after all commits and comments are processed
+        const response = AgentOP(adjusted_commit_array, adjusted_coments_array, username, title, url);
+      }));
+
+    } catch (error) {
+      console.error(`Error processing repo ${repo.name}:`, error);
+    }
+  }));
+  res.send("done");
 }
 
 
