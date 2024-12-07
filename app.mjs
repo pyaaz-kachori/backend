@@ -30,4 +30,28 @@ app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });
 
+async function fetchPullRequests(config) {
+  try {
+    const response = await axios(config);
+    return response.data
+  } catch (error) {
+    console.error(error);
+  }
+}
+function AgentOP(commits,comment,name,title,url){
+  console.log(commits)
+  console.log(comment) //contributor
+  console.log(name) //contributor
+  console.log(title) // title
+  console.log(url)
+  var obj = {
+    changes: commits,
+    discussion: comment,
+    contributor : name,
+    title:title,
+    url:url
+  }
+  axios.post(storeURL,JSON.stringify(obj));
+
+}
 
