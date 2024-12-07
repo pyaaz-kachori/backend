@@ -101,4 +101,64 @@ async function handler(req, res) {
                   },
               });
   
-              
+// Process comments
+comments.data.forEach((comment) => {
+  console.log(`Comment author: ${comment.user.login}`);
+  console.log(`Comment body: ${comment.body}`);
+  adjusted_coments_array.push({
+      username: comment.user.login,
+      body: comment.body
+  });
+});
+
+// Fetch commits
+const commits = await octokit.request(`GET /repos/${orgName}/${repo.name}/pulls/${pull.number}/commits`, {
+  owner: orgName,
+  repo: repo.name,
+  pull_number: pull.number,
+  headers: {
+      'X-GitHub-Api-Version': '2022-11-28',
+  },
+});
+
+// Process commits with await to ensure sequential processing
+for (const commit of commits.data) {
+  // console.log(commit)
+  console.log(`Commit message: ${commit.commit.message}`);
+  console.log(`Commit SHA: ${commit.sha}`);
+
+  const changes = await octokit.request(`GET /repos/${orgName}/${repo.name}/commits/${commit.sha}`, {
+      owner: orgName,
+      repo: repo.name,
+      ref: commit.sha,
+      headers: {
+          'X-GitHub-Api-Version': '2022-11-28',
+      },
+  });
+
+  console.log("File changes -----------------------");
+  const files = changes.data.files;
+  files.forEach((file) => {
+      const obj = {
+          filename: file.filename,
+          rawURL: file.raw_url,
+          patch: file.patch  
+      };
+      console.log(obj);
+      adjusted_commit_array.push(obj);
+  });
+}
+
+// Only call AgentOP after all commits and comments are processed
+const response = AgentOP(adjusted_commit_array, adjusted_coments_array, username, title,url);
+}));
+
+} catch (error) {
+console.error(`Error processing repo ${repo.name}:`, error);
+}
+}));
+
+res.send("done");
+}
+
+
