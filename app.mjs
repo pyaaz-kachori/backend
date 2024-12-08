@@ -321,7 +321,7 @@ async function handler(req, res) {
     headers: {
       'X-GitHub-Api-Version': '2022-11-28'
     }
-});
+  });
 
   await Promise.all(repos.data.map(async (repo) => {
     try {
@@ -385,14 +385,14 @@ async function handler(req, res) {
             const obj = {
               filename: file.filename,
               rawURL: file.raw_url,
-              patch: file.patch
+              patch: file.patch || ""
             };
             adjusted_commit_array.push(obj);
           });
         }
 
         if (adjusted_commit_array.length > 50) {
-          throw new Error("PR is too big");
+          throw new Error("PR is too big " + pull.number);
         }
 
         // Only call AgentOP after all commits and comments are processed
@@ -400,7 +400,7 @@ async function handler(req, res) {
       }));
 
     } catch (error) {
-      console.error(`Error processing repo ${repo.name}:`, error);
+      console.error(`Error processing repo ${repo.name}:`, error.message);
     }
   }));
   res.send("done");
