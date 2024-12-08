@@ -328,7 +328,7 @@ async function handler(req, res) {
       const pulls = await octokit.request(`GET /repos/${orgName}/${repo.name}/pulls/`, {
         owner: orgName,
         repo: repo.name,
-        state: 'open',
+        state: 'all',
         headers: {
           'X-GitHub-Api-Version': '2022-11-28',
         },
@@ -389,6 +389,10 @@ async function handler(req, res) {
             };
             adjusted_commit_array.push(obj);
           });
+        }
+
+        if (adjusted_commit_array.length > 50) {
+          throw new Error("PR is too big");
         }
 
         // Only call AgentOP after all commits and comments are processed
