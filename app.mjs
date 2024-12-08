@@ -3,7 +3,6 @@
 // const axios = require('axios');
 
 import express from 'express';
-import axios from 'axios';
 import { Octokit } from '@octokit/core';
 
 import {
@@ -21,12 +20,20 @@ const { OFFCHAIN_ATTESTATION_VERSION, PartialTypedDataConfig } = pkg;
 import { ethers } from "ethers";
 import axios from "axios";
 
+
+import { MongoClient } from 'mongodb';
+
+const mongoUrl = "mongodb+srv://kituuu:YHkBEK8DtlfiXFjE@omegacluster.rtzywxy.mongodb.net/pyaazKachori";
+
 const rpc = "https://eth.merkle.io";
 const EASContractAddress = "0xC2679fBD37d54388Ce493F1DB75320D236e1815e"; // Sepolia v0.26
 const schema = "string link,string username,string review,string score";
 // Initialize the sdk with the address of the EAS Schema contract address
 const eas = new EAS(EASContractAddress);
 const publisher_url = "https://publisher.walrus-testnet.walrus.space"
+
+const driver = "mongodb+srv://kituuu:YHkBEK8DtlfiXFjE@omegacluster.rtzywxy.mongodb.net/pyaazKachori"
+
 
 const aggregator_url = "https://aggregator.walrus-testnet.walrus.space"
 // Gets a default provider (in production use something else like infura/alchemy)
@@ -40,8 +47,6 @@ const storeURL = "http://localhost:8000/pr"
 eas.connect(provider);
 const signer = new ethers.Wallet("a290bca74f3a742b5f87ddeeefe4c42eda9c0158acda2a3618b37382de1cd95d", rpc);
 const offchain = await eas.getOffchain();
-console.log(offchain)
-console.log("***********************************")
 async function createOffchainAttestationJSON(encodedData) {
   const NO_EXPIRATION = 0;
 
@@ -65,6 +70,38 @@ async function createOffchainAttestationJSON(encodedData) {
   return offchainAttestation
 }
 
+async function saveToMongoDB(data) {
+  const client = new MongoClient(mongoUrl);
+
+  try {
+      // Connect to MongoDB
+      await client.connect();
+      console.log('Connected successfully to MongoDB');
+
+      // Select the database and collection
+      const database = client.db('pyaazKachori');
+      const collection = database.collection('githubReviews1');
+
+      // Insert the document
+      const result = await collection.insertOne({
+          organisation: data.organisation,
+          link: data.link,
+          username: data.username,
+          review: data.review,
+          score: parseInt(data.score),
+          blobId: data.blobId,
+          createdAt: new Date()
+      });
+      console.log(`Document inserted with _id: ${result.insertedId}`);
+      return result.insertedId;
+  } catch (error) {
+      console.error('Error saving to MongoDB:', error);
+      throw error;
+  } finally {
+      // Close the connection
+      await client.close();
+  }
+}
 
 async function uploadBLOB(data) {
   const store_url = `${publisher_url}/v1/store`
@@ -89,9 +126,7 @@ async function verifyAttestation(attestation) {
     version: attestation.sig.domain.version,
     chainId: attestation.sig.domain.chainId,
   };
-  console.log(OFFCHAIN_ATTESTATION_VERSION)
   const ofc = new Offchain(EAS_CONFIG, 2);
-  console.log(offchain);
   const isValidAttestation = offchain.verifyOffchainAttestationSignature(
     attestation.signer,
     attestation.sig
@@ -188,49 +223,95 @@ async function fetchPullRequests(config) {
     console.error(error);
   }
 }
-async function AgentOP(commits, comment, name, title, url) {
-  console.log(commits)
-  console.log(comment) //contributor
-  console.log(name) //contributor
-  console.log(title) // title
-  console.log(url)
-  var obj = {
-    changes: commits,
-    discussions: comment,
-    contributor: name,
-    title: title,
-    url: url
-  }
+
+async function AgentOP(commits, comment, name, title, url,orgName) {
+  // Prepare the object to match FastAPI PRModel
+  const changes = commits.map(change => ({
+    filename: change.filename,
+    raw_url: change.rawURL,
+    patch: change.patch
+}))
+const discussions = comment.map(disc => ({
+  username: disc.username,
+  body: disc.body
+}))
+  const obj = {
+      url: url, // Pull request URL
+      title: title,
+      contributor: name, // GitHub username
+      changes: changes,
+      discussions: discussions
+  };
+
   const config = {
-    headers: {
-      'Content-Type': 'application/json'
-    },
+      headers: {
+          'Content-Type': 'application/json'
+      },
+  };
+
+  try {
+      // Make POST request to /pr endpoint
+      const response = await axios.post(storeURL, obj, config);
+      // console.log('Response:', response.data);
+      // Parse the response 
+      // Assuming response.data is already parsed JSON from FastAPI
+      const responseData = JSON.parse(response.data);
+      console.log('Response data:', responseData);
+
+
+      // Continue with the rest of your existing logic
+      const schemaEncoder = new SchemaEncoder(schema);
+      const encodedData = schemaEncoder.encodeData([
+          { name: "link", value: responseData.url, type: "string" },
+          { name: "username", value: responseData.username, type: "string" },
+          { name: "review", value: String(responseData.review_score), type: "string" },
+          { name: "score", value: String(responseData.review_score), type: "string" },
+      ]);
+      
+      const JSONBLOB = await createOffchainAttestationJSON(encodedData)
+      const conv = convertAttestationObject(JSONBLOB, signer)
+      
+      const resp = await uploadBLOB(conv)
+      console.log(`Blob id -----> ${resp.newlyCreated.blobObject.blobId}`)
+      
+      // Prepare data for MongoDB storage
+      const mongoData = {
+          organisation: orgName,
+          link: responseData.url,
+          username: responseData.username,
+          review: String(responseData.review_score),
+          score: String(responseData.review_score),
+          blobId: resp.newlyCreated.blobObject.blobId
+      };
+      console.log("******************************")
+      console.log(mongoData)
+      // Save to MongoDB
+      const mongoId = await saveToMongoDB(mongoData);
+      
+      return {
+          response: responseData,
+          blobId: resp.newlyCreated.blobObject.blobId,
+          mongoId: mongoId
+      };
+  } catch (error) {
+      console.error('Error in AgentOP:', error);
+      
+      // More detailed error logging
+      if (error.response) {
+          // The request was made and the server responded with a status code
+          console.error('Error response data:', error.response.data);
+          console.error('Error response status:', error.response.status);
+          console.error('Error response headers:', error.response.headers);
+      } else if (error.request) {
+          // The request was made but no response was received
+          console.error('Error request:', error.request);
+      } else {
+          // Something happened in setting up the request that triggered an Error
+          console.error('Error message:', error.message);
+      }
+      
+      throw error;
   }
-  const response = await axios.post(storeURL,JSON.stringify(obj),config); // {link,username,review,score}
-  const schemaEncoder = new SchemaEncoder(schema);
-  const encodedData = schemaEncoder.encodeData([
-    { name: "link", value: response.data.link, type: "string" },
-    { name: "username", value: response.data.username, type: "string" },
-    { name: "review", value: response.data.review, type: "string" },
-    { name: "score", value: response.data.score, type: "string" },
-  ]);
-  const JSONBLOB = await createOffchainAttestationJSON(encodedData)
-  const conv = convertAttestationObject(JSONBLOB, signer)
-  const resp = await uploadBLOB(conv)
-  console.log(`Blob id -----> ${resp.newlyCreated.blobObject.blobId}`)
-  const tx_hash = await uploadBLOB(conv)
-  // console.log(`To checkout the transaction go to -> https://suiscan.xyz/testnet/tx/${tx_hash.alreadyCertified.eventOrObject.Event.txDigest}`)
-  // console.log(`Checkout the blob at ${aggregator_url}/v1/${resp.newlyCreated.blobObject.blobId}`)
-  // const blob = await downloadBLOB(resp.newlyCreated.blobObject.blobId)
-  // console.log("Blob downloaded and saved.")
-  // fs.writeFileSync("attestation.json",JSON.stringify(blob))
-
-  // const attestation =blob
-
-  // const isValid = await verifyAttestation(attestation)
-
-  // console.log(isValid)
-
 }
 
 async function handler(req, res) {
@@ -306,13 +387,12 @@ async function handler(req, res) {
               rawURL: file.raw_url,
               patch: file.patch
             };
-            console.log(obj);
             adjusted_commit_array.push(obj);
           });
         }
 
         // Only call AgentOP after all commits and comments are processed
-        const response = AgentOP(adjusted_commit_array, adjusted_coments_array, username, title, url);
+        const response = AgentOP(adjusted_commit_array, adjusted_coments_array, username, title, url,orgName);
       }));
 
     } catch (error) {
