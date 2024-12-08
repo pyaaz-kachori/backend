@@ -328,7 +328,7 @@ async function handler(req, res) {
       const pulls = await octokit.request(`GET /repos/${orgName}/${repo.name}/pulls/`, {
         owner: orgName,
         repo: repo.name,
-        state: 'open',
+        state: 'all',
         headers: {
           'X-GitHub-Api-Version': '2022-11-28',
         },
