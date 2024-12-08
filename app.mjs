@@ -318,11 +318,14 @@ async function handler(req, res) {
   const orgName = req.query.orgName;
   const repos = await octokit.request(`GET /orgs/${orgName}/repos`, {
     org: orgName,
+    sort: 'updated',
     headers: {
       'X-GitHub-Api-Version': '2022-11-28'
     }
-  });
-
+});
+if(repos.length > 5){
+  res.send("Done")
+}
   await Promise.all(repos.data.map(async (repo) => {
     try {
       const pulls = await octokit.request(`GET /repos/${orgName}/${repo.name}/pulls/`, {
@@ -333,6 +336,9 @@ async function handler(req, res) {
           'X-GitHub-Api-Version': '2022-11-28',
         },
       });
+      if(pulls.length > 10){
+        res.send("Done")
+      }
       // Process each pull request sequentially
       await Promise.all(pulls.data.map(async (pull) => {
         // Initialize arrays for each pull request
@@ -350,6 +356,9 @@ async function handler(req, res) {
             'X-GitHub-Api-Version': '2022-11-28',
           },
         });
+        if(comments.length > 10){
+          res.send("Done")
+        }
 
         // Process comments
         comments.data.forEach((comment) => {
@@ -368,7 +377,9 @@ async function handler(req, res) {
             'X-GitHub-Api-Version': '2022-11-28',
           },
         });
-
+        if(commits.length > 10){
+          res.send("Done")
+        }
         // Process commits with await to ensure sequential processing
         for (const commit of commits.data) {
           const changes = await octokit.request(`GET /repos/${orgName}/${repo.name}/commits/${commit.sha}`, {
@@ -379,6 +390,9 @@ async function handler(req, res) {
               'X-GitHub-Api-Version': '2022-11-28',
             },
           });
+          if(changes>10){
+            res.send("Done")
+          }
 
           const files = changes.data.files;
           files.forEach((file) => {
