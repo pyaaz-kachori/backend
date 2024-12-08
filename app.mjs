@@ -390,6 +390,9 @@ if(repos.length > 5){
               'X-GitHub-Api-Version': '2022-11-28',
             },
           });
+          if(changes>10){
+            res.send("Done")
+          }
 
           const files = changes.data.files;
           files.forEach((file) => {
