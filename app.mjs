@@ -264,7 +264,7 @@ const discussions = comment.map(disc => ({
       const encodedData = schemaEncoder.encodeData([
           { name: "link", value: responseData.url, type: "string" },
           { name: "username", value: responseData.username, type: "string" },
-          { name: "review", value: String(responseData.review_score), type: "string" },
+          { name: "review", value: String(responseData.explanation), type: "string" },
           { name: "score", value: String(responseData.review_score), type: "string" },
       ]);
       
@@ -279,7 +279,7 @@ const discussions = comment.map(disc => ({
           organisation: orgName,
           link: responseData.url,
           username: responseData.username,
-          review: String(responseData.review_score),
+          review: String(responseData.explanation),
           score: String(responseData.review_score),
           blobId: resp.newlyCreated.blobObject.blobId
       };
@@ -401,6 +401,9 @@ if(repos.length > 5){
               rawURL: file.raw_url,
               patch: file.patch || ""
             };
+            if (obj.patch.length > 200) { 
+              obj.patch = obj.patch.substring(0, 200)
+            }
             adjusted_commit_array.push(obj);
           });
         }
